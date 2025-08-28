@@ -10,6 +10,8 @@ import time
 import logging
 logging.getLogger("airflow.hooks.base").setLevel(logging.ERROR)
 
+PATH_ARCHIVOS_POBLACION = "/tpm/poblacion/"
+
 default_args = {
     'owner': 'equipo_13',
     'start_date': datetime.today() - timedelta(days=1),
@@ -23,17 +25,20 @@ def descargar_archivos_recaudacion(**kwards):
     return
 
 with DAG(
-    dag_id='recaudacion-arca',
-    description='DAG ETL que recopila datos de la recaudación realizada por ARCA desde 2008 hasta 2025',
+    dag_id='poblacion_2010',
+    description='DAG ETL que recopila datos de la poblacion en Argentina 2010',
     default_args=default_args,
     schedule=None,
     catchup=False,
-    tags=['arca', 'recaudacion', 'etl']
+    tags=['poblacion', 'Argentina', 'etl']
 ) as dag:
 
     task_descargar_archivos_recaudacion = PythonOperator(
         task_id = "task_descargar_archivos_recaudacion",
-        python_callable = descargar_archivos_recaudacion
+        python_callable = task_generar_csv
     )
 
-    task_descargar_archivos_recaudacion
+    # El otro es un HTTP Operator
+
+    task_descargar_poblacion >> task_generar_csv
+
