@@ -13,11 +13,13 @@ import time
 from datetime import datetime, timedelta
 import logging
 import xlrd
+from openpyxl import load_workbook
 logging.getLogger("airflow.hooks.base").setLevel(logging.ERROR)
 
 INITIAL_YEAR = 2008
 LAST_YEAR = 2025
 URL_ARCHIVO_IPC_ARGENTINA = "/ftp/cuadros/economia/sh_ipc_08_25.xls"
+URL_ARCHIVO_IPC_CORDOBA = "/dataset/fedc5285-5517-41aa-9095-bb62c6dbc485/resource/2b4a7c60-1c8a-45b1-be8f-2bd59bfe2364/download/ipc-cba-julio.xlsx"
 BASE_URL_ARCHIVO_RECAUDACION = "https://contenidos.afip.gob.ar/institucional/estudios/archivos/serie"
 PATH_ARCHIVOS_RECAUDACION = "/tmp/recaudacion/"
 PATH_ARCHIVOS_IPC = "/tmp/ipc/"
@@ -50,6 +52,20 @@ def obtener_hoja_xls(hook, endpoint, nombre_hoja):
         data.append(row)    
     
     return data
+
+# Función que trae una hoja de un archivo Excel (.xlsx)
+def obtener_hoja_xlsx(hook, endpoint, nombre_hoja):
+   res = hook.run(endpoint)
+   data = BytesIO(res.content)
+
+   workbook = load_workbook(data,data_only=True)
+   sheet = workbook[nombre_hoja]
+
+   data = []
+   for row in sheet.iter_rows(values_only=True):
+       data.append(list(row))
+   
+   return data
 
 class CSVExporter:
     def __init__(self):
@@ -119,7 +135,7 @@ def descargar_ipc_argentina(**kwards):
 
             anio = date_obj.year
             mes = date_obj.month
-            valor = float(column[ix_fila_nivel_general])
+            valor = float(column[ix_fila_nivel_general]) / 100
             
             exporter.add(anio, mes, valor)
 
@@ -129,9 +145,55 @@ def descargar_ipc_argentina(**kwards):
         return ruta
 
     except Exception as e:
-        logging.error(f"[ERROR] Problema al descargar IPC de argentina: {e}")
+        logging.error(f"[ERROR] Problema al descargar IPC de Argentina: {e}")
         raise e
 
+
+def descargar_ipc_cordoba(**kwards):
+    hook = HttpHook(http_conn_id='estadisticacordoba', method='GET')
+
+    try:
+        source = obtener_hoja_xlsx(hook, URL_ARCHIVO_IPC_CORDOBA, "Variaciones Mensuales")
+        # Encontrar filas de periodo y de nivel general
+        nombre_fila_periodo = "Descripción"
+        ix_fila_periodo = None
+        nombre_fila_nivel_general = "NIVEL GENERAL"
+        ix_fila_nivel_general = None
+        for index, row in enumerate(source):
+            if row[2] == nombre_fila_periodo:
+                ix_fila_periodo = index
+                continue
+            if row[2] == nombre_fila_nivel_general:
+                ix_fila_nivel_general = index
+            if ix_fila_periodo is not None and ix_fila_nivel_general is not None:
+                break
+        if (ix_fila_periodo is None):
+            raise Exception("No se encontró la fila con los periodos")
+        if (ix_fila_nivel_general is None):
+            raise Exception("No se encontró la fila con los valores del nivel general")
+
+        # Encontrar valores del IPC
+        exporter = CSVExporter()
+        for index, column in enumerate(zip(*source)):
+            periodo = column[ix_fila_periodo]
+                        
+            if not isinstance(periodo, datetime):
+                continue
+
+            anio = periodo.year
+            mes = periodo.month
+            valor = float(column[ix_fila_nivel_general])
+            
+            exporter.add(anio, mes, valor)
+
+        # Convertir a CSV
+        ruta = exporter.export(PATH_ARCHIVOS_IPC, "cordoba")
+
+        return ruta
+
+    except Exception as e:
+        logging.error(f"[ERROR] Problema al descargar IPC de Córdoba: {e}")
+        raise e
 
 def descargar_archivos_recaudacion(**kwards):
     return
@@ -150,12 +212,17 @@ with DAG(
         python_callable = descargar_ipc_argentina
     )
 
+    task_descargar_ipc_cordoba = PythonOperator(
+        task_id = "task_descargar_ipc_cordoba",
+        python_callable = descargar_ipc_cordoba
+    )
+
     task_descargar_archivos_recaudacion = PythonOperator(
         task_id = "task_descargar_archivos_recaudacion",
         python_callable = descargar_archivos_recaudacion
     )
 
-    [task_descargar_ipc_argentina, task_descargar_archivos_recaudacion]
+    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_archivos_recaudacion]
     # [task_descargar_ipc_argentina, task_descargar_ipc_gba, task_descargar_ipc_cordoba, task_descargar_ipc_santafe, task_descargar_ipc_mendoza, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae] >> task_merge
 
 # El csv para la poblacion zona (String), poblacion, solo para las provincias que tengamos IPC

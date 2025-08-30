@@ -1,1 +1,1 @@
-docker cp dag-recaudacion-arca_b5ea64-scheduler-1:/tmp/ipc/argentina.csv ./resultados/ipc/argentina.csv
+docker cp dag-recaudacion-arca_b5ea64-scheduler-1:/tmp/ipc/ ./resultados

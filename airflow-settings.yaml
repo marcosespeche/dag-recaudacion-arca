@@ -9,6 +9,15 @@ airflow:
       conn_port:
       conn_extra:
         example_extra_field: example-value
+    - conn_id: estadisticacordoba
+      conn_type: http
+      conn_host: https://datosestadistica.cba.gov.ar
+      conn_schema:
+      conn_login:
+      conn_password:
+      conn_port:
+      conn_extra:
+        example_extra_field: example-value
   pools:
     - pool_name:
       pool_slot:
