@@ -2,7 +2,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.providers.http.operators.http import HttpOperator
 from airflow.providers.http.hooks.http import HttpHook
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import pandas as pd
 from io import BytesIO
 import re
@@ -289,6 +289,33 @@ def descargar_emae(**kwards):
 
     return csv_exporter.export(PATH_ARCHIVOS_EMAE, 'emae')
 
+def descargar_ipc_tucuman(**kwargs):
+    hook = HttpHook(http_conn_id = 'ipc-tucuman', method = 'GET')
+    csv_exporter = CSVExporter()
+
+    try:
+        data = obtener_hoja_xlsx(hook, '/archivos/7Precios/1Precios/SERIE_IPCT_JUL_25.xlsx', 'SERIE DE TIEMPO')
+
+        for index, row in enumerate(data):
+
+            # Si no encuentra una fecha, pasa a la siguiente fila
+            if (not isinstance(row[0], (datetime, date))):
+                continue
+            
+            fecha = row[0]
+            nro_mes = fecha.month
+            nro_anio = fecha.year
+            ipc = row[1]
+
+            if(nro_anio >= INITIAL_YEAR and nro_anio <= LAST_YEAR):
+                csv_exporter.add(nro_anio, nro_mes, ipc)
+
+        return csv_exporter.export(PATH_ARCHIVOS_IPC, 'tucuman')
+    
+    except Exception as e:
+        logging.error(f"Problema al descargar el IPC de Tucumán: {e}")
+        raise e
+
 with DAG(
     dag_id='montos',
     description='DAG ETL que recopila datos económicos en Argentina y de la recaudación realizada por ARCA desde 2008 hasta 2025',
@@ -318,7 +345,12 @@ with DAG(
         python_callable = descargar_emae
     )
 
-    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_archivos_recaudacion, task_descargar_emae]
+    task_descargar_ipc_tucuman = PythonOperator(
+        task_id = 'task_descargar_ipc_tucuman',
+        python_callable = descargar_ipc_tucuman
+    )
+
+    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae]
     # [task_descargar_ipc_argentina, task_descargar_ipc_gba, task_descargar_ipc_cordoba, task_descargar_ipc_santafe, task_descargar_ipc_mendoza, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae] >> task_merge
 
 # El csv para la poblacion zona (String), poblacion, solo para las provincias que tengamos IPC

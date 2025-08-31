@@ -18,7 +18,7 @@ airflow:
       conn_port:
       conn_extra:
         example_extra_field: example-value
-    - conn_id: recaudacion
+    - conn_id: recaudacion-arca
       conn_type: http
       conn_host: https://contenidos.afip.gob.ar
       conn_schema:
@@ -30,6 +30,9 @@ airflow:
     - conn_id: emae
       conn_type: http
       conn_host: https://www.indec.gob.ar/ftp/cuadros/economia/
+    - conn_id: ipc-tucuman
+      conn_type: http
+      conn_host: https://estadistica.tucuman.gov.ar
   pools:
     - pool_name:
       pool_slot:
