@@ -259,8 +259,13 @@ def descargar_emae(**kwards):
             mes = row[1] 
             valor = row[2]
 
+            # Si aun no se llega a un año en curso, se saltea la fila
+            if current_year is None and not (isinstance(anio, (int, float)) and INITIAL_YEAR <= int(anio) <= LAST_YEAR):
+                continue
+
             # Si se detecta un nuevo año, se pisa el valor de current_year anterior y añaden los datos registrados hasta el momento en el CSV
             if isinstance(anio, (int, float)) and INITIAL_YEAR <= int(anio) <= LAST_YEAR:
+
                 if current_year and meses_por_anio:
                     for m, v in meses_por_anio.items():
                         csv_exporter.add(current_year, m, v)
@@ -268,13 +273,10 @@ def descargar_emae(**kwards):
 
                 current_year = int(anio)
 
-            # Aun no se llega a los datos del Excel, se saltea la fila
-            elif current_year is None:
-                continue  
-
             # Registrar valor del mes si es válido
             if mes and mes in MESES_MAP and valor is not None:
-                meses_por_anio[MESES_MAP[mes]] = valor
+                mes_numero = MESES_MAP[mes]
+                meses_por_anio[mes_numero] = valor
 
         # Volcar lo último acumulado
         if current_year and meses_por_anio:
