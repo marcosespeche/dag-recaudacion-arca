@@ -33,6 +33,9 @@ airflow:
     - conn_id: ipc-tucuman
       conn_type: http
       conn_host: https://estadistica.tucuman.gov.ar
+    - conn_id: ipc-santafe
+      conn_type: http
+      conn_host: https://www.estadisticasantafe.gob.ar
   pools:
     - pool_name:
       pool_slot:

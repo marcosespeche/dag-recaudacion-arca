@@ -47,7 +47,14 @@ def obtener_hoja_xls(hook, endpoint, nombre_hoja):
     for row_idx in range(sheet.nrows):
         row = []
         for col_idx in range(sheet.ncols):
-            cell_value = sheet.cell_value(row_idx, col_idx)
+            cell = sheet.cell(row_idx, col_idx)
+            cell_value = cell.value
+            
+            # El casteo a datetime no se realiza de forma manual
+            if cell.ctype == xlrd.XL_CELL_DATE:
+                date_tuple = xlrd.xldate_as_tuple(cell_value, workbook.datemode)
+                cell_value = datetime(*date_tuple)
+            
             row.append(cell_value)
         data.append(row)    
     
@@ -125,18 +132,21 @@ def descargar_ipc_argentina(**kwards):
         exporter = CSVExporter()
         for index, column in enumerate(zip(*source)):
             periodo = column[ix_fila_periodo]
-            
-            if not (isinstance(periodo, (int, float)) and periodo > 0):
+           
+            if isinstance(periodo, datetime):
+                anio = periodo.year
+                mes = periodo.month
+            elif isinstance(periodo, (int, float)) and periodo > 0:
+                if periodo >= 60:
+                    date_obj = datetime(1899, 12, 30) + timedelta(days=periodo)
+                else:
+                    date_obj = datetime(1899, 12, 31) + timedelta(days=periodo)
+                anio = date_obj.year
+                mes = date_obj.month
+            else:
                 continue
-            if periodo >= 60:
-                date_obj = datetime(1899, 12, 30) + timedelta(days=periodo)
-            else: 
-                date_obj = datetime(1899, 12, 31) + timedelta(days=periodo)
-
-            anio = date_obj.year
-            mes = date_obj.month
-            valor = float(column[ix_fila_nivel_general]) / 100
             
+            valor = float(column[ix_fila_nivel_general]) / 100
             exporter.add(anio, mes, valor)
 
         # Convertir a CSV
@@ -305,7 +315,7 @@ def descargar_ipc_tucuman(**kwargs):
             fecha = row[0]
             nro_mes = fecha.month
             nro_anio = fecha.year
-            ipc = row[1]
+            ipc = row[2]
 
             if(nro_anio >= INITIAL_YEAR and nro_anio <= LAST_YEAR):
                 csv_exporter.add(nro_anio, nro_mes, ipc)
@@ -313,7 +323,34 @@ def descargar_ipc_tucuman(**kwargs):
         return csv_exporter.export(PATH_ARCHIVOS_IPC, 'tucuman')
     
     except Exception as e:
-        logging.error(f"Problema al descargar el IPC de Tucumán: {e}")
+        logging.error(f"Error al descargar el IPC de Tucumán: {e}")
+        raise e
+    
+def descargar_ipc_santafe(**kwargs):
+    hook = HttpHook(http_conn_id = 'ipc-santafe', method = 'GET')
+    csv_exporter = CSVExporter()
+
+    try:
+        data = obtener_hoja_xls(hook, '/wp-content/uploads/sites/24/2025/06/IPC_Serie-IPC-por-capitulos-0725.xls', r'Var % capítulos')
+
+        for index, row in enumerate(data):
+
+            fecha = row[0]
+
+            if (not isinstance(fecha, (datetime, date))):
+                continue
+
+            nro_mes = fecha.month
+            nro_anio = fecha.year
+            ipc = row[1]
+
+            if(nro_anio >= INITIAL_YEAR and nro_anio <= LAST_YEAR):
+                csv_exporter.add(nro_anio, nro_mes, ipc)
+
+        return csv_exporter.export(PATH_ARCHIVOS_IPC, 'santafe')
+
+    except Exception as e:
+        logging.error(f'Error al descargar el IPC de Santa Fé: {e}')
         raise e
 
 with DAG(
@@ -350,7 +387,12 @@ with DAG(
         python_callable = descargar_ipc_tucuman
     )
 
-    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae]
+    task_descargar_ipc_santafe = PythonOperator(
+        task_id = 'task_descargar_ipc_santefe',
+        python_callable = descargar_ipc_santafe
+    )
+
+    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae]
     # [task_descargar_ipc_argentina, task_descargar_ipc_gba, task_descargar_ipc_cordoba, task_descargar_ipc_santafe, task_descargar_ipc_mendoza, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae] >> task_merge
 
 # El csv para la poblacion zona (String), poblacion, solo para las provincias que tengamos IPC
