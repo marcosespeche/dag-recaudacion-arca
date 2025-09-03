@@ -36,6 +36,12 @@ airflow:
     - conn_id: ipc-santafe
       conn_type: http
       conn_host: https://www.estadisticasantafe.gob.ar
+    - conn_id: ipc-mendoza
+      conn_type: http
+      conn_host: https://deie.mendoza.gov.ar
+    - conn_id: ipc-gba
+      conn_type: http
+      conn_host: https://infra.datos.gob.ar
   pools:
     - pool_name:
       pool_slot:

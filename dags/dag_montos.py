@@ -21,6 +21,8 @@ LAST_YEAR = 2025
 URL_ARCHIVO_IPC_ARGENTINA = "/ftp/cuadros/economia/sh_ipc_08_25.xls"
 URL_ARCHIVO_IPC_CORDOBA = "/dataset/fedc5285-5517-41aa-9095-bb62c6dbc485/resource/2b4a7c60-1c8a-45b1-be8f-2bd59bfe2364/download/ipc-cba-julio.xlsx"
 URL_ARCHIVO_RECAUDACION = "/institucional/estudios/archivos/serie"
+URL_ARCHIVO_IPC_MENDOZA = "/data/download-files/?ids=1365"
+URL_ARCHIVO_IPC_GBA = "/catalog/sspm/dataset/96/distribution/96.3/download/indice-precios-al-consumidor-bienes-servicios-base-2008-mensual.csv"
 PATH_ARCHIVOS_RECAUDACION = "/tmp/recaudacion/"
 PATH_ARCHIVOS_IPC = "/tmp/ipc/"
 PATH_ARCHIVOS_EMAE = "/tmp/emae/"
@@ -33,6 +35,22 @@ default_args = {
     'retry_delay': timedelta(minutes=2),
     'email_on_failure': False,
     'depends_on_past': False,
+}
+
+#Map para convertir nombre de mes a número
+MESES_MAP = {
+    'enero': 1,
+    'febrero': 2,
+    'marzo': 3,
+    'abril': 4,
+    'mayo': 5,
+    'junio': 6,
+    'julio': 7,
+    'agosto': 8,
+    'septiembre': 9,
+    'octubre': 10,
+    'noviembre': 11,
+    'diciembre': 12
 }
 
 # Función que trae una hoja de un archivo Excel (.xls)
@@ -73,6 +91,14 @@ def obtener_hoja_xlsx(hook, endpoint, nombre_hoja):
        data.append(list(row))
    
    return data
+
+# Función que obtiene un archivo CSV
+def obtener_csv(hook, endpoint):
+    res = hook.run(endpoint)
+    data = BytesIO(res.content)
+    import pandas as pd
+    df = pd.read_csv(data, header=None)
+    return df.values.tolist()
 
 class CSVExporter:
     def __init__(self):
@@ -157,7 +183,6 @@ def descargar_ipc_argentina(**kwards):
     except Exception as e:
         logging.error(f"[ERROR] Problema al descargar IPC de Argentina: {e}")
         raise e
-
 
 def descargar_ipc_cordoba(**kwards):
     hook = HttpHook(http_conn_id='estadisticacordoba', method='GET')
@@ -353,6 +378,53 @@ def descargar_ipc_santafe(**kwargs):
         logging.error(f'Error al descargar el IPC de Santa Fé: {e}')
         raise e
 
+def descargar_ipc_mendoza(**kwargs):
+    hook = HttpHook(http_conn_id='ipc-mendoza', method='GET')
+    try:
+        data = obtener_hoja_xls(hook, URL_ARCHIVO_IPC_MENDOZA, "IPC MZA Base 2010")
+        anio = None
+        csv_exporter = CSVExporter()
+        for index, row in enumerate(data):
+            if 5 < index < 581:
+                if row and len(row) >= 4:
+                    if row[1] not in (None, ''):
+                        anio = int(float(row[1]))
+
+                    mes_str = str(row[2]).strip().lower()
+                    if mes_str in MESES_MAP:
+                        mes = MESES_MAP[mes_str]
+                    else:
+                        continue
+
+                    valor = float(str(row[3]).replace(',', '.'))
+
+                    if anio and mes and valor:
+                        csv_exporter.add(anio, mes, valor)              
+
+        return csv_exporter.export(PATH_ARCHIVOS_IPC, "mendoza")
+
+    except Exception as e:
+        logging.error(f"[ERROR] Problema al descargar datos de ipc Mendoza: {e}")
+        raise e
+
+def descargar_ipc_gba(**kwards):
+    hook = HttpHook(http_conn_id='ipc-gba', method='GET')
+    csv_exporter = CSVExporter()
+    data = obtener_csv(hook, URL_ARCHIVO_IPC_GBA)
+    try:
+        for row in data[1:]:
+            fecha = row[0]
+            valor = float(row[1])
+            fecha_dt = pd.to_datetime(fecha)
+            anio = fecha_dt.year
+            mes = fecha_dt.month
+            csv_exporter.add(anio, mes, valor)
+        return csv_exporter.export(PATH_ARCHIVOS_IPC, "gba")
+    except Exception as e:
+        logging.error(f"[ERROR] Problema al descargar datos de ipc GBA: {e}")
+        raise e
+    
+
 with DAG(
     dag_id='montos',
     description='DAG ETL que recopila datos económicos en Argentina y de la recaudación realizada por ARCA desde 2008 hasta 2025',
@@ -392,7 +464,17 @@ with DAG(
         python_callable = descargar_ipc_santafe
     )
 
-    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae]
+    task_descargar_ipc_mendoza = PythonOperator(
+        task_id = 'task_descargar_ipc_mendoza',
+        python_callable = descargar_ipc_mendoza
+    )
+
+    task_descargar_ipc_gba = PythonOperator(
+        task_id = 'task_descargar_ipc_gba',
+        python_callable = descargar_ipc_gba
+    )
+
+    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae, task_descargar_ipc_mendoza, task_descargar_ipc_santafe, task_descargar_ipc_gba]
     # [task_descargar_ipc_argentina, task_descargar_ipc_gba, task_descargar_ipc_cordoba, task_descargar_ipc_santafe, task_descargar_ipc_mendoza, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae] >> task_merge
 
 # El csv para la poblacion zona (String), poblacion, solo para las provincias que tengamos IPC
