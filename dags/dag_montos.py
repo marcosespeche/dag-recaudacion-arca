@@ -5,11 +5,7 @@ from airflow.providers.http.hooks.http import HttpHook
 from datetime import date, datetime, timedelta
 import pandas as pd
 from io import BytesIO
-import re
 from pathlib import Path
-import os
-import json
-import time
 from datetime import datetime, timedelta
 import logging
 import xlrd
@@ -27,6 +23,8 @@ PATH_ARCHIVOS_RECAUDACION = "/tmp/recaudacion/"
 PATH_ARCHIVOS_IPC = "/tmp/ipc/"
 PATH_ARCHIVOS_EMAE = "/tmp/emae/"
 PATH_ARCHIVOS_OUTPUT = "/tmp/result/"
+
+LIST_TASKS_ID = ['recaudacion', 'emae', 'ipc_argentina', 'ipc_cordoba', 'ipc_tucuman', 'ipc_santafe', 'ipc_gba', 'ipc_mendoza']
 
 default_args = {
     'owner': 'equipo_13',
@@ -96,7 +94,6 @@ def obtener_hoja_xlsx(hook, endpoint, nombre_hoja):
 def obtener_csv(hook, endpoint):
     res = hook.run(endpoint)
     data = BytesIO(res.content)
-    import pandas as pd
     df = pd.read_csv(data, header=None)
     return df.values.tolist()
 
@@ -230,7 +227,7 @@ def descargar_ipc_cordoba(**kwards):
         logging.error(f"[ERROR] Problema al descargar IPC de Córdoba: {e}")
         raise e
 
-def descargar_archivos_recaudacion(**kwards):
+def descargar_recaudacion(**kwards):
     hook = HttpHook(http_conn_id='recaudacion-arca', method='GET')
     csv_exporter = CSVExporter()
     try:
@@ -248,9 +245,6 @@ def descargar_archivos_recaudacion(**kwards):
                 for month in range(1, 13):
                     column_index = month + 1
                     recaudacion = row[column_index]
-                    if year < 2021:
-                        # Antes de 2021: convertir de miles a millones
-                        recaudacion = recaudacion / 1000
                     if recaudacion is not None and recaudacion != '':
                         # No agarra el valor total (la sumatoria de todos los meses) porque está definido como una función de Excel, no es un valor numerico en sí
                         csv_exporter.add(year, month, recaudacion)
@@ -295,11 +289,11 @@ def descargar_emae(**kwards):
             valor = row[2]
 
             # Si aun no se llega a un año en curso, se saltea la fila
-            if current_year is None and not (isinstance(anio, (int, float)) and INITIAL_YEAR <= int(anio) <= LAST_YEAR):
+            if current_year is None and not (isinstance(anio, (int, float))):
                 continue
 
             # Si se detecta un nuevo año, se pisa el valor de current_year anterior y añaden los datos registrados hasta el momento en el CSV
-            if isinstance(anio, (int, float)) and INITIAL_YEAR <= int(anio) <= LAST_YEAR:
+            if isinstance(anio, (int, float)):
 
                 if current_year and meses_por_anio:
                     for m, v in meses_por_anio.items():
@@ -341,8 +335,8 @@ def descargar_ipc_tucuman(**kwargs):
             nro_mes = fecha.month
             nro_anio = fecha.year
             ipc = row[2]
-
-            if(nro_anio >= INITIAL_YEAR and nro_anio <= LAST_YEAR):
+            
+            if (ipc is not None):
                 csv_exporter.add(nro_anio, nro_mes, ipc)
 
         return csv_exporter.export(PATH_ARCHIVOS_IPC, 'tucuman')
@@ -368,9 +362,7 @@ def descargar_ipc_santafe(**kwargs):
             nro_mes = fecha.month
             nro_anio = fecha.year
             ipc = row[1]
-
-            if(nro_anio >= INITIAL_YEAR and nro_anio <= LAST_YEAR):
-                csv_exporter.add(nro_anio, nro_mes, ipc)
+            csv_exporter.add(nro_anio, nro_mes, ipc)
 
         return csv_exporter.export(PATH_ARCHIVOS_IPC, 'santafe')
 
@@ -385,6 +377,7 @@ def descargar_ipc_mendoza(**kwargs):
         anio = None
         csv_exporter = CSVExporter()
         for index, row in enumerate(data):
+            #filas con los datos en el formato que necesitamos
             if 5 < index < 581:
                 if row and len(row) >= 4:
                     if row[1] not in (None, ''):
@@ -425,6 +418,25 @@ def descargar_ipc_gba(**kwards):
         raise e
     
 
+def merge (**kwargs):
+    data = [{'nombre': task, 'df': pd.read_csv(kwargs['ti'].xcom_pull(task_ids = "task_descargar_" + task))}  for task in LIST_TASKS_ID]
+
+    result_dfs = []
+
+    for item in data:
+        df = item['df'].set_index(['anio', 'mes'])
+        df = df.rename(columns= {'valor': item['nombre']})
+        result_dfs.append(df)
+
+    df = pd.concat(result_dfs, axis=1, join='outer')
+
+    Path(PATH_ARCHIVOS_OUTPUT).mkdir(parents=True, exist_ok=True)
+
+    df = df.sort_values(by=['anio', 'mes'])
+
+    df.to_csv(PATH_ARCHIVOS_OUTPUT + 'montos.csv')
+
+
 with DAG(
     dag_id='montos',
     description='DAG ETL que recopila datos económicos en Argentina y de la recaudación realizada por ARCA desde 2008 hasta 2025',
@@ -445,8 +457,8 @@ with DAG(
     )
 
     task_descargar_archivos_recaudacion = PythonOperator(
-        task_id = "task_descargar_archivos_recaudacion",
-        python_callable = descargar_archivos_recaudacion
+        task_id = "task_descargar_recaudacion",
+        python_callable = descargar_recaudacion
     )
 
     task_descargar_emae = PythonOperator(
@@ -460,7 +472,7 @@ with DAG(
     )
 
     task_descargar_ipc_santafe = PythonOperator(
-        task_id = 'task_descargar_ipc_santefe',
+        task_id = 'task_descargar_ipc_santafe',
         python_callable = descargar_ipc_santafe
     )
 
@@ -474,8 +486,12 @@ with DAG(
         python_callable = descargar_ipc_gba
     )
 
-    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae, task_descargar_ipc_mendoza, task_descargar_ipc_santafe, task_descargar_ipc_gba]
-    # [task_descargar_ipc_argentina, task_descargar_ipc_gba, task_descargar_ipc_cordoba, task_descargar_ipc_santafe, task_descargar_ipc_mendoza, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae] >> task_merge
+    task_merge = PythonOperator(
+        task_id = 'task_merge',
+        python_callable = merge
+    )
+
+    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae, task_descargar_ipc_mendoza, task_descargar_ipc_santafe, task_descargar_ipc_gba] >> task_merge
 
 # El csv para la poblacion zona (String), poblacion, solo para las provincias que tengamos IPC
 

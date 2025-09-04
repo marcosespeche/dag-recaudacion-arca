@@ -50,20 +50,6 @@ def obtener_hoja_xls(hook, endpoint, nombre_hoja):
     
     return data
 
-# Función que trae una hoja de un archivo Excel (.xlsx)
-def obtener_hoja_xlsx(hook, endpoint, nombre_hoja):
-   res = hook.run(endpoint)
-   data = BytesIO(res.content)
-
-   workbook = load_workbook(data,data_only=True)
-   sheet = workbook[nombre_hoja]
-
-   data = []
-   for row in sheet.iter_rows(values_only=True):
-       data.append(list(row))
-   
-   return data
-
 class CSVExporter:
     def __init__(self):
         self.values = []
@@ -94,6 +80,7 @@ def descargar_archivos_poblacion(**kwards):
         
         csv_exporter = CSVExporter()
         for index, row in enumerate(data):
+            #filas con los datos necesarios el resto es texto explicativo
             if index > 5 and index < 34 and row[0]!='':
                 provincia=row[0]
                 poblacion=row[2]
