@@ -19,12 +19,16 @@ URL_ARCHIVO_IPC_CORDOBA = "/dataset/fedc5285-5517-41aa-9095-bb62c6dbc485/resourc
 URL_ARCHIVO_RECAUDACION = "/institucional/estudios/archivos/serie"
 URL_ARCHIVO_IPC_MENDOZA = "/data/download-files/?ids=1365"
 URL_ARCHIVO_IPC_GBA = "/catalog/sspm/dataset/96/distribution/96.3/download/indice-precios-al-consumidor-bienes-servicios-base-2008-mensual.csv"
+URL_ARCHIVO_BALANZA_COMERCIAL = "/ftp/cuadros/economia/balanmensual.xls"
+URL_ARCHIVO_DOLAR_BLUE = '/historico-dolar-blue/custom/1-1-2008_26-9-2025'
 PATH_ARCHIVOS_RECAUDACION = "/tmp/recaudacion/"
 PATH_ARCHIVOS_IPC = "/tmp/ipc/"
 PATH_ARCHIVOS_EMAE = "/tmp/emae/"
 PATH_ARCHIVOS_OUTPUT = "/tmp/result/"
+PATH_ARCHIVOS_BALANZA_COMERCIAL = "/tmp/balanza-comercial/"
+PATH_ARCHIVOS_DOLAR_BLUE = "/tmp/dolar-blue/"
 
-LIST_TASKS_ID = ['recaudacion', 'emae', 'ipc_argentina', 'ipc_cordoba', 'ipc_tucuman', 'ipc_santafe', 'ipc_gba', 'ipc_mendoza']
+LIST_TASKS_ID = ['recaudacion', 'emae', 'ipc_argentina', 'ipc_cordoba', 'ipc_tucuman', 'ipc_santafe', 'ipc_gba', 'ipc_mendoza', 'balanza_comercial', 'dolar_blue']
 
 default_args = {
     'owner': 'equipo_13',
@@ -417,9 +421,174 @@ def descargar_ipc_gba(**kwards):
         logging.error(f"[ERROR] Problema al descargar datos de ipc GBA: {e}")
         raise e
     
+def descargar_balanza_comercial(**kwargs):
+    hook = HttpHook(http_conn_id='balanza-comercial', method='GET')
+    csv_importaciones = CSVExporter()
+    csv_exportaciones = CSVExporter()
+
+    data = obtener_hoja_xls(hook, URL_ARCHIVO_BALANZA_COMERCIAL, 'FOB-CIF')
+
+    current_year = None
+    exportaciones_por_mes = {}
+    importaciones_por_mes = {}
+
+    columna_exportaciones = 2
+    columna_importaciones = 7
+
+    try:
+        for index, row in enumerate(data):
+
+            anio = limpiar_anio(row[0])
+            mes = str(row[1]).strip().lower()
+            exportacion = row[columna_exportaciones]
+            importacion = row[columna_importaciones]
+
+            # Si aun no se llega a un año en curso, se saltea la fila
+            if current_year is None and not (isinstance(anio, (int, float))):
+                continue
+
+            # Si se detecta un nuevo año, se pisa el valor de current_year anterior y añaden los datos registrados hasta el momento en el CSV
+            if isinstance(anio, (int, float)):
+
+                if current_year and exportaciones_por_mes and importaciones_por_mes:
+                    for m, v in exportaciones_por_mes.items():
+                        csv_exportaciones.add(current_year, m, v)
+                    exportaciones_por_mes.clear()
+                    for m, v in importaciones_por_mes.items():
+                        csv_importaciones.add(current_year, m, v)
+                    importaciones_por_mes.clear()
+
+                current_year = int(anio)
+
+            # Registrar valor del mes si es válido
+            if mes and mes in MESES_MAP and exportacion is not None and importacion is not None:
+                mes_numero = MESES_MAP[mes]
+                exportaciones_por_mes[mes_numero] = exportacion
+                importaciones_por_mes[mes_numero] = importacion
+
+        # Volcar lo último acumulado
+        if current_year and exportaciones_por_mes and importaciones_por_mes:
+            for m, v in exportaciones_por_mes.items():
+                csv_exportaciones.add(current_year, m, v)
+            for m, v in importaciones_por_mes.items():
+                csv_importaciones.add(current_year, m, v)
+
+    except Exception as e:
+        logging.error(f'Error al descargar datos de la Balanza Comercial: {e}')
+        raise e
+    
+    return csv_exportaciones.export(PATH_ARCHIVOS_BALANZA_COMERCIAL, 'exportaciones'), csv_importaciones.export(PATH_ARCHIVOS_BALANZA_COMERCIAL, 'importaciones')
+
+def limpiar_anio(valor):
+    if valor is None:
+        return None
+    
+    valor_str = str(valor).strip()
+
+    if valor_str.startswith("'"):
+        valor_str = valor_str[1:]
+
+    if valor_str.endswith("*"):
+        valor_str = valor_str[:-1]
+
+    if valor_str.isdigit():
+        return int(valor_str)
+    
+    return None
+
+def descargar_dolar_blue(**kwargs):
+    try:
+        csv_exporter = CSVExporter()
+
+        hook = HttpHook(http_conn_id='dolar-blue', method='GET')
+
+        response = hook.run(endpoint=URL_ARCHIVO_DOLAR_BLUE)
+  
+        if response.status_code != 200:
+            raise Exception(f"Error HTTP {response.status_code}: {response.text}")
+
+        data = response.json()
+
+        ultimo_anio = None
+        ultimo_mes = None
+        ultimo_valor = None
+
+        for index, item in enumerate(data):
+            fecha_str = item['x']
+            valor = item['y']
+
+            anio, mes = parsear_fecha(fecha_str)
+
+            if (ultimo_anio is not None and ultimo_mes is not None and 
+                (anio != ultimo_anio or mes != ultimo_mes)):
+                csv_exporter.add(ultimo_anio, ultimo_mes, ultimo_valor)
+
+            ultimo_anio = anio
+            ultimo_mes = mes
+            ultimo_valor = valor
+
+        if ultimo_anio is not None and ultimo_mes is not None and ultimo_valor is not None:
+            csv_exporter.add(ultimo_anio, ultimo_mes, ultimo_valor)
+
+        return csv_exporter.export(PATH_ARCHIVOS_DOLAR_BLUE, 'dolar_blue')
+        
+    except Exception as e:
+        logging.error(f"Error al descargar datos del dólar blue: {e}")
+        raise e
+
+
+def parsear_fecha(fecha_str):
+    try:
+        fecha_limpia = fecha_str.split(" GMT")[0]
+
+        fecha_obj = datetime.strptime(fecha_limpia, "%a %b %d %Y %H:%M:%S")
+        
+        return fecha_obj.year, fecha_obj.month
+        
+    except Exception as e:
+        try:
+            import re
+            year_match = re.search(r'\b(20[0-3]\d)\b', fecha_str)
+            meses_en = {
+                'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+            }
+            
+            if year_match:
+                anio = int(year_match.group(1))
+                fecha_lower = fecha_str.lower()
+                for mes_nombre, mes_num in meses_en.items():
+                    if mes_nombre in fecha_lower:
+                        return anio, mes_num
+                 
+        except:
+            pass
+            
+        return None, None
 
 def merge (**kwargs):
-    data = [{'nombre': task, 'df': pd.read_csv(kwargs['ti'].xcom_pull(task_ids = "task_descargar_" + task))}  for task in LIST_TASKS_ID]
+    data = []
+    
+    for task in LIST_TASKS_ID:
+        if task == 'balanza_comercial':
+            # Porque la balanza retorna una tupla de rutas (una para exportaciones, y otra para importaciones)
+            rutas = kwargs['ti'].xcom_pull(task_ids="task_descargar_" + task)
+            ruta_exportaciones, ruta_importaciones = rutas
+            
+            # Agregar ambos archivos por separado
+            data.append({
+                'nombre': 'exportaciones', 
+                'df': pd.read_csv(ruta_exportaciones)
+            })
+            data.append({
+                'nombre': 'importaciones', 
+                'df': pd.read_csv(ruta_importaciones)
+            })
+        else:
+            data.append({
+                'nombre': task, 
+                'df': pd.read_csv(kwargs['ti'].xcom_pull(task_ids="task_descargar_" + task))
+            })
 
     result_dfs = []
 
@@ -486,12 +655,22 @@ with DAG(
         python_callable = descargar_ipc_gba
     )
 
+    task_descargar_balanza_comercial = PythonOperator(
+        task_id = 'task_descargar_balanza_comercial',
+        python_callable = descargar_balanza_comercial
+    )
+
+    task_descargar_dolar_blue = PythonOperator(
+        task_id = 'task_descargar_dolar_blue',
+        python_callable = descargar_dolar_blue
+    )
+
     task_merge = PythonOperator(
         task_id = 'task_merge',
         python_callable = merge
     )
 
-    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae, task_descargar_ipc_mendoza, task_descargar_ipc_santafe, task_descargar_ipc_gba] >> task_merge
+    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae, task_descargar_ipc_mendoza, task_descargar_ipc_santafe, task_descargar_ipc_gba, task_descargar_balanza_comercial, task_descargar_dolar_blue] >> task_merge
 
 # El csv para la poblacion zona (String), poblacion, solo para las provincias que tengamos IPC
 

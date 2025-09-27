@@ -42,6 +42,12 @@ airflow:
     - conn_id: ipc-gba
       conn_type: http
       conn_host: https://infra.datos.gob.ar
+    - conn_id: balanza-comercial
+      conn_type: http
+      conn_host: https://www.indec.gob.ar
+    - conn_id: dolar-blue
+      conn_type: http
+      conn_host: https://dolarhoy.com
   pools:
     - pool_name:
       pool_slot:
