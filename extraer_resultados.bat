@@ -1,1 +1,1 @@
-docker cp dag-recaudacion-arca_b5ea64-scheduler-1:/tmp/ ./resultados
+docker cp dag-recaudacion-arca_0f9b0c-scheduler-1:/tmp/ ./resultados

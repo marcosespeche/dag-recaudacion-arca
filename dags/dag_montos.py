@@ -22,6 +22,7 @@ URL_ARCHIVO_IPC_GBA = "/catalog/sspm/dataset/96/distribution/96.3/download/indic
 URL_ARCHIVO_BALANZA_COMERCIAL = "/ftp/cuadros/economia/balanmensual.xls"
 URL_ARCHIVO_DOLAR_BLUE = '/historico-dolar-blue/custom/1-1-2008_26-9-2025'
 URL_API_MONEDAS_PUBLICO = '/Monetarias/25'
+URL_API_DISTRIBUCION_INGRESOS = '/indicadores-distribucion-ingreso-ocupacion-principal-e-ingreso-per-capita-familiar.csv'
 
 PATH_ARCHIVOS_RECAUDACION = "/tmp/recaudacion/"
 PATH_ARCHIVOS_IPC = "/tmp/ipc/"
@@ -30,8 +31,9 @@ PATH_ARCHIVOS_OUTPUT = "/tmp/result/"
 PATH_ARCHIVOS_BALANZA_COMERCIAL = "/tmp/balanza-comercial/"
 PATH_ARCHIVOS_DOLAR_BLUE = "/tmp/dolar-blue/"
 PATH_ARCHIVOS_MONEDAS_PUBLICO = "/tmp/monedas-publico/"
+PATH_ARCHIVOS_DISTRIBUCION_INGRESOS = "/tmp/distribucion-ingresos/"
 
-LIST_TASKS_ID = ['recaudacion', 'emae', 'ipc_argentina', 'ipc_cordoba', 'ipc_tucuman', 'ipc_santafe', 'ipc_gba', 'ipc_mendoza', 'balanza_comercial', 'dolar_blue', 'monedas_publico']
+LIST_TASKS_ID = ['recaudacion', 'emae', 'ipc_argentina', 'ipc_cordoba', 'ipc_tucuman', 'ipc_santafe', 'ipc_gba', 'ipc_mendoza', 'balanza_comercial', 'dolar_blue', 'monedas_publico', 'ingresos_familiares']
 
 default_args = {
     'owner': 'equipo_13',
@@ -621,6 +623,23 @@ def descargar_monedas_publico(**kwargs):
         logging.error(f"Error al descargar datos de billetes y monedas en poder del público: {e}")
         raise e
 
+def descargar_ingresos_familiares(**kwargs):
+    hook = HttpHook(http_conn_id='ingresos-familiares', method='GET')
+    csv_exporter = CSVExporter()
+    data = obtener_csv(hook, URL_API_DISTRIBUCION_INGRESOS)
+    try:
+        for row in data[1:]:
+            fecha = row[0]
+            valor = float(row[2])
+            fecha_dt = pd.to_datetime(fecha)
+            anio = fecha_dt.year
+            mes = fecha_dt.month
+            csv_exporter.add(anio, mes, valor)
+        return csv_exporter.export(PATH_ARCHIVOS_DISTRIBUCION_INGRESOS, "ingresos_familiares")
+    except Exception as e:
+        logging.error(f"[ERROR] Problema al descargar datos de distribución de ingresoo familiares: {e}")
+        raise e
+
 def merge (**kwargs):
     data = []
     
@@ -723,6 +742,11 @@ with DAG(
     task_descargar_monedas_publico = PythonOperator(
         task_id = 'task_descargar_monedas_publico',
         python_callable = descargar_monedas_publico
+    )
+
+    task_descargar_ingresos_familiares = PythonOperator(
+        task_id = 'task_descargar_ingresos_familiares',
+        python_callable = descargar_ingresos_familiares
     )
 
     task_merge = PythonOperator(
