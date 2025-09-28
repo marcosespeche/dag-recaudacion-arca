@@ -34,7 +34,7 @@ PATH_ARCHIVOS_DOLAR = "/tmp/dolar/"
 PATH_ARCHIVOS_MONEDAS_PUBLICO = "/tmp/monedas-publico/"
 PATH_ARCHIVOS_DISTRIBUCION_INGRESOS = "/tmp/distribucion-ingresos/"
 
-LIST_TASKS_ID = ['recaudacion', 'emae', 'ipc_argentina', 'ipc_cordoba', 'ipc_tucuman', 'ipc_santafe', 'ipc_gba', 'ipc_mendoza', 'balanza_comercial', 'dolar_blue', 'dolar_oficial', 'monedas_publico']
+LIST_TASKS_ID = ['recaudacion', 'emae', 'ipc_argentina', 'ipc_cordoba', 'ipc_tucuman', 'ipc_santafe', 'ipc_gba', 'ipc_mendoza', 'balanza_comercial', 'dolar_blue', 'dolar_oficial', 'monedas_publico', 'ingresos_familiares']
 
 default_args = {
     'owner': 'equipo_13',
@@ -808,7 +808,7 @@ with DAG(
         python_callable = merge
     )
 
-    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae, task_descargar_ipc_mendoza, task_descargar_ipc_santafe, task_descargar_ipc_gba, task_descargar_balanza_comercial, task_descargar_dolar_blue, task_descargar_monedas_publico] >> task_merge
+    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae, task_descargar_ipc_mendoza, task_descargar_ipc_santafe, task_descargar_ipc_gba, task_descargar_balanza_comercial, task_descargar_dolar_blue, task_descargar_monedas_publico, task_descargar_ingresos_familiares] >> task_merge
 
 # El csv para la poblacion zona (String), poblacion, solo para las provincias que tengamos IPC
 
