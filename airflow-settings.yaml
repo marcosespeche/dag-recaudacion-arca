@@ -48,6 +48,9 @@ airflow:
     - conn_id: dolar-blue
       conn_type: http
       conn_host: https://dolarhoy.com
+    - conn_id: bcra-estadisticas
+      conn_type: http
+      conn_host: https://api.bcra.gob.ar/estadisticas/v4.0
   pools:
     - pool_name:
       pool_slot:

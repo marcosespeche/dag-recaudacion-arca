@@ -21,14 +21,17 @@ URL_ARCHIVO_IPC_MENDOZA = "/data/download-files/?ids=1365"
 URL_ARCHIVO_IPC_GBA = "/catalog/sspm/dataset/96/distribution/96.3/download/indice-precios-al-consumidor-bienes-servicios-base-2008-mensual.csv"
 URL_ARCHIVO_BALANZA_COMERCIAL = "/ftp/cuadros/economia/balanmensual.xls"
 URL_ARCHIVO_DOLAR_BLUE = '/historico-dolar-blue/custom/1-1-2008_26-9-2025'
+URL_API_MONEDAS_PUBLICO = '/Monetarias/25'
+
 PATH_ARCHIVOS_RECAUDACION = "/tmp/recaudacion/"
 PATH_ARCHIVOS_IPC = "/tmp/ipc/"
 PATH_ARCHIVOS_EMAE = "/tmp/emae/"
 PATH_ARCHIVOS_OUTPUT = "/tmp/result/"
 PATH_ARCHIVOS_BALANZA_COMERCIAL = "/tmp/balanza-comercial/"
 PATH_ARCHIVOS_DOLAR_BLUE = "/tmp/dolar-blue/"
+PATH_ARCHIVOS_MONEDAS_PUBLICO = "/tmp/monedas-publico/"
 
-LIST_TASKS_ID = ['recaudacion', 'emae', 'ipc_argentina', 'ipc_cordoba', 'ipc_tucuman', 'ipc_santafe', 'ipc_gba', 'ipc_mendoza', 'balanza_comercial', 'dolar_blue']
+LIST_TASKS_ID = ['recaudacion', 'emae', 'ipc_argentina', 'ipc_cordoba', 'ipc_tucuman', 'ipc_santafe', 'ipc_gba', 'ipc_mendoza', 'balanza_comercial', 'dolar_blue', 'monedas_publico']
 
 default_args = {
     'owner': 'equipo_13',
@@ -104,6 +107,10 @@ def obtener_csv(hook, endpoint):
 class CSVExporter:
     def __init__(self):
         self.values = []
+        self.overwrite_repeated = False
+
+    def set_overwrite_repeated_policy(self, overwrite : bool):
+        self.overwrite_repeated = overwrite
     
     def add(self, anio, mes, valor):
         if not isinstance(anio, int) or anio < 1900 or anio > 2025:
@@ -113,11 +120,20 @@ class CSVExporter:
         if not isinstance(valor, (int, float)):
             raise Exception(f"El valor {valor} no es válido")
         
-        self.values.append({
-            "anio": anio,
-            "mes": mes,
-            "valor": valor
-        })
+        if not any(v['anio'] == anio and v['mes'] == mes for v in self.values):
+            self.values.append({
+                "anio": anio,
+                "mes": mes,
+                "valor": valor
+            })
+            return
+        
+        if self.overwrite_repeated:
+            for v in self.values:
+                if v['anio'] == anio and v['mes'] == mes:
+                    v['valor'] = valor
+                    break
+            
 
     def export(self, path, name):
         df = pd.DataFrame(self.values)
@@ -565,6 +581,45 @@ def parsear_fecha(fecha_str):
             pass
             
         return None, None
+    
+
+def descargar_monedas_publico(**kwargs):
+    try:
+        hook = HttpHook(http_conn_id='bcra-estadisticas', method='GET')
+        csv_exporter = CSVExporter()
+
+        desde = "2008-01-01"
+        hasta = datetime.today().strftime('%Y-%m-%d')
+
+        isLastPage = False
+        offset = 0
+
+        while (not isLastPage):
+            response = hook.run(endpoint=f'{URL_API_MONEDAS_PUBLICO}?desde={desde}&hasta={hasta}&limit=3000&offset={offset}', extra_options={"verify": False})
+        
+            if response.status_code != 200:
+                raise Exception(f"Error HTTP {response.status_code}: {response.text}")
+
+            data = response.json()
+
+            if (data["metadata"]["resultset"]["offset"] + data["metadata"]["resultset"]["limit"] > data["metadata"]["resultset"]["count"]):
+                isLastPage = True
+            offset += 3000
+
+            detalles = data["results"][0]["detalle"]
+
+            for d in detalles:
+                fecha = datetime.strptime(d["fecha"], '%Y-%m-%d').date()
+                anio = fecha.year
+                mes = fecha.month
+
+                csv_exporter.add(anio, mes, d["valor"])
+
+        return csv_exporter.export(PATH_ARCHIVOS_MONEDAS_PUBLICO, 'monedas_publico')
+
+    except Exception as e:
+        logging.error(f"Error al descargar datos de billetes y monedas en poder del público: {e}")
+        raise e
 
 def merge (**kwargs):
     data = []
@@ -665,12 +720,17 @@ with DAG(
         python_callable = descargar_dolar_blue
     )
 
+    task_descargar_monedas_publico = PythonOperator(
+        task_id = 'task_descargar_monedas_publico',
+        python_callable = descargar_monedas_publico
+    )
+
     task_merge = PythonOperator(
         task_id = 'task_merge',
         python_callable = merge
     )
 
-    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae, task_descargar_ipc_mendoza, task_descargar_ipc_santafe, task_descargar_ipc_gba, task_descargar_balanza_comercial, task_descargar_dolar_blue] >> task_merge
+    [task_descargar_ipc_argentina, task_descargar_ipc_cordoba, task_descargar_ipc_tucuman, task_descargar_archivos_recaudacion, task_descargar_emae, task_descargar_ipc_mendoza, task_descargar_ipc_santafe, task_descargar_ipc_gba, task_descargar_balanza_comercial, task_descargar_dolar_blue, task_descargar_monedas_publico] >> task_merge
 
 # El csv para la poblacion zona (String), poblacion, solo para las provincias que tengamos IPC
 
