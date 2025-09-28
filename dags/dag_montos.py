@@ -20,7 +20,8 @@ URL_ARCHIVO_RECAUDACION = "/institucional/estudios/archivos/serie"
 URL_ARCHIVO_IPC_MENDOZA = "/data/download-files/?ids=1365"
 URL_ARCHIVO_IPC_GBA = "/catalog/sspm/dataset/96/distribution/96.3/download/indice-precios-al-consumidor-bienes-servicios-base-2008-mensual.csv"
 URL_ARCHIVO_BALANZA_COMERCIAL = "/ftp/cuadros/economia/balanmensual.xls"
-URL_ARCHIVO_DOLAR_BLUE = '/historico-dolar-blue/custom/1-1-2008_26-9-2025'
+URL_ARCHIVO_DOLAR_BLUE = '/dolar/informal/grafico/1995-08-28/2025-09-28'
+URL_ARCHIVO_DOLAR_OFICIAL = '/dolar/oficial/grafico/1995-08-28/2025-09-28'
 URL_API_MONEDAS_PUBLICO = '/Monetarias/25'
 
 PATH_ARCHIVOS_RECAUDACION = "/tmp/recaudacion/"
@@ -28,10 +29,10 @@ PATH_ARCHIVOS_IPC = "/tmp/ipc/"
 PATH_ARCHIVOS_EMAE = "/tmp/emae/"
 PATH_ARCHIVOS_OUTPUT = "/tmp/result/"
 PATH_ARCHIVOS_BALANZA_COMERCIAL = "/tmp/balanza-comercial/"
-PATH_ARCHIVOS_DOLAR_BLUE = "/tmp/dolar-blue/"
+PATH_ARCHIVOS_DOLAR = "/tmp/dolar/"
 PATH_ARCHIVOS_MONEDAS_PUBLICO = "/tmp/monedas-publico/"
 
-LIST_TASKS_ID = ['recaudacion', 'emae', 'ipc_argentina', 'ipc_cordoba', 'ipc_tucuman', 'ipc_santafe', 'ipc_gba', 'ipc_mendoza', 'balanza_comercial', 'dolar_blue', 'monedas_publico']
+LIST_TASKS_ID = ['recaudacion', 'emae', 'ipc_argentina', 'ipc_cordoba', 'ipc_tucuman', 'ipc_santafe', 'ipc_gba', 'ipc_mendoza', 'balanza_comercial', 'dolar_blue', 'dolar_oficial', 'monedas_publico']
 
 default_args = {
     'owner': 'equipo_13',
@@ -512,13 +513,25 @@ def limpiar_anio(valor):
     
     return None
 
-def descargar_dolar_blue(**kwargs):
+def descargar_dolar_oficial(**kwargs):
     try:
         csv_exporter = CSVExporter()
 
-        hook = HttpHook(http_conn_id='dolar-blue', method='GET')
+        hook = HttpHook(http_conn_id='dolar', method='GET')
 
-        response = hook.run(endpoint=URL_ARCHIVO_DOLAR_BLUE)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json,text/html;q=0.9,*/*;q=0.8"
+        }
+
+        response = hook.run(
+            endpoint=URL_ARCHIVO_DOLAR_OFICIAL,
+            headers=headers
+        )
+
+        print(response.text)
   
         if response.status_code != 200:
             raise Exception(f"Error HTTP {response.status_code}: {response.text}")
@@ -530,8 +543,12 @@ def descargar_dolar_blue(**kwargs):
         ultimo_valor = None
 
         for index, item in enumerate(data):
-            fecha_str = item['x']
-            valor = item['y']
+
+            if index == 0:
+                continue
+
+            fecha_str = item[0]
+            valor = item[1]
 
             anio, mes = parsear_fecha(fecha_str)
 
@@ -546,41 +563,73 @@ def descargar_dolar_blue(**kwargs):
         if ultimo_anio is not None and ultimo_mes is not None and ultimo_valor is not None:
             csv_exporter.add(ultimo_anio, ultimo_mes, ultimo_valor)
 
-        return csv_exporter.export(PATH_ARCHIVOS_DOLAR_BLUE, 'dolar_blue')
+
+        return csv_exporter.export(PATH_ARCHIVOS_DOLAR, 'dolar_oficial')
+    
+    except Exception as e:
+        logging.error(f"Error al descargar datos del dólar blue: {e}")
+        raise e
+
+def descargar_dolar_blue(**kwargs):
+    try:
+        csv_exporter = CSVExporter()
+
+        hook = HttpHook(http_conn_id='dolar', method='GET')
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json,text/html;q=0.9,*/*;q=0.8"
+        }
+
+        response = hook.run(
+            endpoint=URL_ARCHIVO_DOLAR_BLUE,
+            headers=headers
+        )
+
+        print(response.text)
+  
+        if response.status_code != 200:
+            raise Exception(f"Error HTTP {response.status_code}: {response.text}")
+
+        data = response.json()
+
+        ultimo_anio = None
+        ultimo_mes = None
+        ultimo_valor = None
+
+        for index, item in enumerate(data):
+
+            if index == 0:
+                continue
+
+            fecha_str = item[0]
+            valor = item[1]
+
+            anio, mes = parsear_fecha(fecha_str)
+
+            if (ultimo_anio is not None and ultimo_mes is not None and 
+                (anio != ultimo_anio or mes != ultimo_mes)):
+                csv_exporter.add(ultimo_anio, ultimo_mes, ultimo_valor)
+
+            ultimo_anio = anio
+            ultimo_mes = mes
+            ultimo_valor = valor
+
+        if ultimo_anio is not None and ultimo_mes is not None and ultimo_valor is not None:
+            csv_exporter.add(ultimo_anio, ultimo_mes, ultimo_valor)
+
+        return csv_exporter.export(PATH_ARCHIVOS_DOLAR, 'dolar_blue')
         
     except Exception as e:
         logging.error(f"Error al descargar datos del dólar blue: {e}")
         raise e
 
 
-def parsear_fecha(fecha_str):
-    try:
-        fecha_limpia = fecha_str.split(" GMT")[0]
-
-        fecha_obj = datetime.strptime(fecha_limpia, "%a %b %d %Y %H:%M:%S")
-        
-        return fecha_obj.year, fecha_obj.month
-        
-    except Exception as e:
-        try:
-            import re
-            year_match = re.search(r'\b(20[0-3]\d)\b', fecha_str)
-            meses_en = {
-                'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-                'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
-            }
-            
-            if year_match:
-                anio = int(year_match.group(1))
-                fecha_lower = fecha_str.lower()
-                for mes_nombre, mes_num in meses_en.items():
-                    if mes_nombre in fecha_lower:
-                        return anio, mes_num
-                 
-        except:
-            pass
-            
-        return None, None
+def parsear_fecha(fecha_str: str):
+    fecha = datetime.strptime(fecha_str, "%d/%m/%Y")
+    return fecha.year, fecha.month
     
 
 def descargar_monedas_publico(**kwargs):
@@ -718,6 +767,11 @@ with DAG(
     task_descargar_dolar_blue = PythonOperator(
         task_id = 'task_descargar_dolar_blue',
         python_callable = descargar_dolar_blue
+    )
+
+    task_descargar_dolar_oficial = PythonOperator(
+        task_id = 'task_descargar_dolar_oficial',
+        python_callable = descargar_dolar_oficial
     )
 
     task_descargar_monedas_publico = PythonOperator(
